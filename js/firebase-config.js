@@ -5,13 +5,15 @@
 // ============================================
 
 const firebaseConfig = {
-    apiKey:            "YOUR_FIREBASE_API_KEY",
-    authDomain:        "YOUR_PROJECT.firebaseapp.com",
-    projectId:         "YOUR_PROJECT_ID",
-    storageBucket:     "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId:             "YOUR_APP_ID"
-  };
+  apiKey: "AIzaSyDomYXDXxOZuuVzPTyvmfJKgjifu8g6IzE",
+  authDomain: "soil-improver.firebaseapp.com",
+  databaseURL: "https://soil-improver-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "soil-improver",
+  storageBucket: "soil-improver.firebasestorage.app",
+  messagingSenderId: "243334230438",
+  appId: "1:243334230438:web:49b2c76bfe97105aa45f67"
+};
+
   
   // Initialize Firebase (compat SDK via CDN)
   firebase.initializeApp(firebaseConfig);
