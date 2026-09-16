@@ -87,12 +87,35 @@ const Charts = {
   },
 
   formatSensorData(readings, field) {
+    if (!Array.isArray(readings)) return { labels: [], values: [] };
+
     return {
       labels: readings.map(r => {
+        if (!r || !r.timestamp) return '--:--';
         const d = r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp);
-        return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        return isNaN(d) ? '--:--' : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       }),
-      values: readings.map(r => r[field] ?? null)
+      values: readings.map(r => {
+        if (!r) return null;
+        
+        // البحث عن القيمة بمرونة تجنباً لاختلاف اسم الحقل (CamelCase / Snake_case / Capitalization)
+        let rawValue = r[field];
+
+        if (rawValue === undefined) {
+          const lowerField = (field || '').toLowerCase();
+          if (lowerField.includes('temp')) {
+            rawValue = r.temperature ?? r.temp ?? r.Temp;
+          } else if (lowerField.includes('humid')) {
+            rawValue = r.humidity ?? r.Humidity;
+          } else if (lowerField.includes('soil') || lowerField.includes('moist')) {
+            rawValue = r.soilMoisture ?? r.soil_moisture ?? r.moisture ?? r.Moisture;
+          }
+        }
+
+        // تحويل القيمة صراحةً إلى Number لضمان فهم Chart.js لها
+        const num = Number(rawValue);
+        return isNaN(num) ? null : num;
+      })
     };
   },
 
