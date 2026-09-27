@@ -22,11 +22,49 @@ const FirestoreService = {
     return { id: uid, ...snap.data() };
   },
 
-  async getFarm(farmId) {
-    if (!farmId) return null;
-    const snap = await db.collection('farms').doc(farmId).get();
-    return snap.exists ? { id: snap.id, ...snap.data() } : null;
-  },
+  async getUserFarm(uid, farmId = null) {
+  try {
+    // First: use the farmId stored in the user document
+    if (farmId) {
+      const farmRef = doc(db, 'farms', farmId);
+      const farmSnap = await getDoc(farmRef);
+
+      if (farmSnap.exists()) {
+        return {
+          id: farmSnap.id,
+          ...farmSnap.data()
+        };
+      }
+
+      console.warn('User farmId exists but farm document was not found:', farmId);
+    }
+
+    // Fallback: search farms by ownerId
+    const q = query(
+      collection(db, 'farms'),
+      where('ownerId', '==', uid),
+      limit(1)
+    );
+
+    const snap = await getDocs(q);
+
+    if (!snap.empty) {
+      const farmDoc = snap.docs[0];
+
+      return {
+        id: farmDoc.id,
+        ...farmDoc.data()
+      };
+    }
+
+    console.warn('No farm found for user:', uid);
+    return null;
+
+  } catch (error) {
+    console.error('getUserFarm error:', error);
+    throw error;
+  }
+  }
 
   async getUserFarm(uid) {
     const snap = await db.collection('farms').where('ownerId', '==', uid).limit(1).get();
