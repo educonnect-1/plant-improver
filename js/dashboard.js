@@ -4,13 +4,13 @@
     document.getElementById('app-root').innerHTML = UI.layoutHTML('dashboard');
     UI.initLayout('dashboard');
     Charts.defaults();
-    
+
     const userData = await FirestoreService.getOrCreateUser(user.uid, user.email, user.displayName);
     const farm = await FirestoreService.getUserFarm(
       user.uid,
       userData?.farmId || null
     );
-    
+
     if (!farm) {
       document.getElementById('page-content').innerHTML = `
         <h1 class="page-title">Welcome to AgriGuard AI</h1>
@@ -19,10 +19,10 @@
       lucide.createIcons();
       return;
     }
-    
+
     const farmNameEl = document.getElementById('farm-name');
     if (farmNameEl) farmNameEl.textContent = farm.name;
-    
+
     const pc = document.getElementById('page-content');
     pc.innerHTML = `
       <section class="hero-section" id="hero">
@@ -71,17 +71,22 @@
       </div>
       <div style="margin-top:28px;">
         <div class="card" id="ai-insight-card">
-          <div class="card-header"><span class="card-title">AI Insight</span><span id="ai-model-tag" class="ai-model-tag"></span></div>
-          <div id="ai-insight-body"><div class="skeleton skeleton-card" style="height:200px"></div></div>
+          <div class="card-header">
+            <span class="card-title">AI Insight</span>
+            <span id="ai-model-tag" class="ai-model-tag"></span>
+          </div>
+          <div id="ai-insight-body">
+            <div class="skeleton skeleton-card" style="height:200px"></div>
+          </div>
         </div>
       </div>
     `;
-    
+
     lucide.createIcons();
-    
+
     const dashboardReadings = await FirestoreService.getSensorHistory(farm.id, null, 1500);
-    console.log('Dashboard Firebase readings:', dashboardReadings);
-    
+    console.log('📊 Dashboard Firebase readings:', dashboardReadings.length);
+
     if (dashboardReadings.length > 0) {
       const latestReading = dashboardReadings[dashboardReadings.length - 1];
       renderSensorCards(latestReading);
@@ -89,7 +94,7 @@
     } else {
       UI.showEmpty(document.getElementById('sensor-cards'), 'No sensor readings yet.');
     }
-    
+
     const unsubAlerts = FirestoreService.subscribeToAlerts(farm.id, alerts => {
       const badge = document.getElementById('alert-badge');
       const dot = document.getElementById('notif-dot');
@@ -103,10 +108,11 @@
       }
     });
     UI.track(unsubAlerts);
-    
-    let currentHours = 1500;
+
+    // ✅ مهم: نبدأ بـ 24 ساعة عشان يطابق الـ active button في الـ UI
+    let currentHours = 24;
     await loadCharts(farm.id, null, currentHours);
-    
+
     document.querySelectorAll('#chart-filter-moisture .filter-tab, #chart-filter-temp .filter-tab').forEach(btn => {
       btn.addEventListener('click', async () => {
         btn.closest('.filter-tabs').querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
@@ -115,17 +121,17 @@
         await loadCharts(farm.id, null, currentHours);
       });
     });
-    
+
     await loadAIInsight(farm.id);
-    
+
     if (window.gsap) {
       gsap.from('.hero-section', { opacity: 0, y: 20, duration: 0.5 });
       gsap.from('.stat-card', { opacity: 0, y: 15, duration: 0.4, stagger: 0.06, delay: 0.2 });
     }
-    
+
     window.addEventListener('beforeunload', () => UI.cleanup());
   } catch (err) {
-    console.error('Dashboard init error:', err);
+    console.error('❌ Dashboard init error:', err);
   }
 })();
 
@@ -179,78 +185,116 @@ function renderSensorCards(r) {
 function updateHero(r) {
   const statusEl = document.getElementById('hero-status');
   if (statusEl) statusEl.textContent = 'Your farm is operating normally.';
-  
+
   const sysEl = document.getElementById('hero-system');
   if (sysEl) sysEl.innerHTML = `<span class="dot green"></span> Operational`;
-  
+
   const pumpEl = document.getElementById('hero-irrigation');
   if (pumpEl) pumpEl.innerHTML = `<span class="dot ${r.pumpStatus ? 'green' : 'amber'}"></span> ${r.pumpStatus ? 'Active' : 'Standby'}`;
 }
 
 async function loadCharts(farmId, zoneId, hours) {
   try {
-    // Same data-loading method used by reports.js
-    const allReadings = await FirestoreService.getSensorHistory(farmId, zoneId, 1500);
-    console.log('Dashboard chart readings:', {
-      farmId,
-      zoneId,
-      total: allReadings.length
-    });
-    
-    if (!allReadings.length) {
-      console.warn('No sensor readings available for dashboard charts.');
+    console.log('📊 Loading charts:', { farmId, zoneId, hours });
+
+    // ✅ التأكد من وجود الـ canvas elements
+    const moistureCanvas = document.getElementById('chart-moisture');
+    const tempCanvas = document.getElementById('chart-temp');
+
+    if (!moistureCanvas || !tempCanvas) {
+      console.error('❌ Chart canvas elements not found!');
       return;
     }
-    
-    // Filter locally according to the selected period
+
+    // ✅ تدمير الـ chart instances القديمة لمنع Memory Leaks
+    if (Charts.instances) {
+      if (Charts.instances['chart-moisture']) {
+        Charts.instances['chart-moisture'].destroy();
+        delete Charts.instances['chart-moisture'];
+      }
+      if (Charts.instances['chart-temp']) {
+        Charts.instances['chart-temp'].destroy();
+        delete Charts.instances['chart-temp'];
+      }
+    }
+
+    // تحميل البيانات
+    const allReadings = await FirestoreService.getSensorHistory(farmId, zoneId, 1500);
+    console.log('📈 Total readings loaded:', allReadings.length);
+
+    if (!allReadings.length) {
+      console.warn('⚠️ No sensor readings available for charts.');
+      return;
+    }
+
+    // فلترة البيانات حسب الفترة الزمنية المختارة
     const cutoff = Date.now() - (hours * 60 * 60 * 1000);
     const readings = allReadings.filter(r => {
       if (!r.timestamp) return false;
       const date = r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp);
       return date.getTime() >= cutoff;
     });
-    
-    // If the selected period has no data, use the available readings
-    // instead of leaving the chart completely empty.
+
+    console.log('📊 Filtered readings for', hours, 'hours:', readings.length);
+
+    // لو مفيش بيانات في الفترة دي، استخدم كل البيانات المتاحة
     const chartReadings = readings.length ? readings : allReadings;
-    
+
+    // ✅ Chart 1: Soil Moisture
     const moisture = Charts.formatSensorData(chartReadings, 'soilMoisture');
-    Charts.createLine(
-      'chart-moisture',
-      moisture.labels,
-      [Charts.sensorDataset('Moisture', moisture.values, '#2D6A4F')]
-    );
-    
+    console.log('💧 Moisture data points:', moisture.values.length);
+
+    if (moisture.values.length > 0) {
+      Charts.createLine(
+        'chart-moisture',
+        moisture.labels,
+        [Charts.sensorDataset('Moisture', moisture.values, '#2D6A4F')]
+      );
+    }
+
+    // ✅ Chart 2: Temperature & Humidity
     const temp = Charts.formatSensorData(chartReadings, 'temperature');
     const hum = Charts.formatSensorData(chartReadings, 'humidity');
-    Charts.createLine(
-      'chart-temp',
-      temp.labels,
-      [
-        Charts.sensorDataset('Temperature', temp.values, '#D97706'),
-        Charts.sensorDataset('Humidity', hum.values, '#2563EB')
-      ]
-    );
+    console.log('🌡️ Temperature data points:', temp.values.length);
+    console.log('💦 Humidity data points:', hum.values.length);
+
+    if (temp.values.length > 0 || hum.values.length > 0) {
+      const datasets = [];
+      if (temp.values.length > 0) {
+        datasets.push(Charts.sensorDataset('Temperature', temp.values, '#D97706'));
+      }
+      if (hum.values.length > 0) {
+        datasets.push(Charts.sensorDataset('Humidity', hum.values, '#2563EB'));
+      }
+      Charts.createLine('chart-temp', temp.labels, datasets);
+    }
   } catch (err) {
-    console.error('Dashboard chart load error:', err);
+    console.error('❌ Dashboard chart load error:', err);
   }
 }
 
 async function loadAIInsight(farmId) {
   const body = document.getElementById('ai-insight-body');
   const tag = document.getElementById('ai-model-tag');
-  
+
   try {
+    // ✅ إصلاح اسم الـ Service (كان Firestor eService)
     const ai = await FirestoreService.getLatestAIAnalysis(farmId);
+
     if (!ai) {
-      UI.showEmpty(body, 'No AI analysis available yet.', '<button class="btn btn-primary" onclick="triggerAnalysis()"><i data-lucide="brain"></i> Analyze Current Conditions</button>');
+      UI.showEmpty(
+        body,
+        'No AI analysis available yet.',
+        '<button class="btn btn-primary" onclick="triggerAnalysis()"><i data-lucide="brain"></i> Analyze Current Conditions</button>'
+      );
       return;
     }
-    
+
     if (tag) tag.textContent = `Analyzed by: ${ai.model || 'unknown'}`;
-    
+
     const scoreColor = ai.healthScore >= 70 ? '#2D6A4F' : ai.healthScore >= 40 ? '#D97706' : '#DC2626';
-    
+
+    // ✅ تنظيف الـ HTML template
     body.innerHTML = `
       <div class="ai-insight-grid">
         <div style="text-align:center">
@@ -261,7 +305,9 @@ async function loadAIInsight(farmId) {
               <span class="score-label">/ 100</span>
             </div>
           </div>
-          <span class="badge-status ${ai.healthScore >= 70 ? 'green' : ai.healthScore >= 40 ? 'amber' : 'red'}">${(ai.healthStatus || 'unknown').toUpperCase()}</span>
+          <span class="badge-status ${ai.healthScore >= 70 ? 'green' : ai.healthScore >= 40 ? 'amber' : 'red'}">
+            ${(ai.healthStatus || 'unknown').toUpperCase()}
+          </span>
         </div>
         <div class="ai-meta-grid">
           <div class="ai-meta-item"><div class="label">Water Stress</div><div class="value">${ai.waterStress || '—'}</div></div>
@@ -272,19 +318,23 @@ async function loadAIInsight(farmId) {
         </div>
       </div>
       ${ai.summary ? `<div class="ai-summary">${ai.summary}</div>` : ''}
-      ${ai.recommendations?.length ? `<ul class="ai-recs">${ai.recommendations.map(r => `<li><i data-lucide="check-circle"></i>${r}</li>`).join('')}</ul>` : ''}
+      ${ai.recommendations?.length ? `
+        <ul class="ai-recs">
+          ${ai.recommendations.map(r => `<li><i data-lucide="check-circle"></i>${r}</li>`).join('')}
+        </ul>
+      ` : ''}
     `;
-    
+
     Charts.createDoughnut('ai-score-canvas', ai.healthScore, 100, scoreColor);
     lucide.createIcons();
-    
+
     const heroHealth = document.getElementById('hero-health');
     if (heroHealth) heroHealth.textContent = `${ai.healthScore} / 100`;
-    
+
     const heroAi = document.getElementById('hero-ai');
     if (heroAi) heroAi.innerHTML = `<span class="dot green"></span> Active`;
   } catch (err) {
-    console.error('AI insight error:', err);
+    console.error('❌ AI insight error:', err);
     body.innerHTML = '<p style="color:var(--text-muted)">Failed to load AI analysis.</p>';
   }
 }
@@ -292,10 +342,10 @@ async function loadAIInsight(farmId) {
 async function triggerAnalysis() {
   UI.toast('Requesting AI analysis…', 'info');
   try {
-    const res = await fetch('/api/ai/analyze', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: '{}' 
+    const res = await fetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
