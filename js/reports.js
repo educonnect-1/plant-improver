@@ -29,8 +29,8 @@
       lucide.createIcons();
   
       const [logs, readings, ai] = await Promise.all([
-        FirestoreService.getIrrigationLogs(farm.id, null, 50),
-        FirestoreService.getSensorHistory(farm.id, null, 168),
+        FirestoreService.getIrrigationLogs(farm.id, null, 1500),
+        FirestoreService.getSensorHistory(farm.id, null, 1500),
         FirestoreService.getLatestAIAnalysis(farm.id)
       ]);
   
