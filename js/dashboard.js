@@ -82,15 +82,25 @@
   
       lucide.createIcons();
   
-      const unsubSensor = FirestoreService.subscribeToLatestSensorReading(farm.id, null, reading => {
-        if (!reading) {
-          UI.showEmpty(document.getElementById('sensor-cards'), 'No sensor readings yet.');
-          return;
-        }
-        renderSensorCards(reading);
-        updateHero(reading);
-      });
-      UI.track(unsubSensor);
+      const dashboardReadings = await FirestoreService.getSensorHistory(
+  farm.id,
+  null,
+  1500
+);
+
+console.log('Dashboard Firebase readings:', dashboardReadings);
+
+if (dashboardReadings.length > 0) {
+  const latestReading = dashboardReadings[dashboardReadings.length - 1];
+
+  renderSensorCards(latestReading);
+  updateHero(latestReading);
+} else {
+  UI.showEmpty(
+    document.getElementById('sensor-cards'),
+    'No sensor readings yet.'
+  );
+}
   
       const unsubAlerts = FirestoreService.subscribeToAlerts(farm.id, alerts => {
         const badge = document.getElementById('alert-badge');
@@ -106,7 +116,7 @@
       });
       UI.track(unsubAlerts);
   
-      let currentHours = 24;
+      let currentHours = 1500;
       await loadCharts(farm.id, null, currentHours);
   
       document.querySelectorAll('#chart-filter-moisture .filter-tab, #chart-filter-temp .filter-tab').forEach(btn => {
@@ -189,25 +199,92 @@
   }
   
   async function loadCharts(farmId, zoneId, hours) {
-    try {
-      const readings = await FirestoreService.getSensorHistory(farmId, zoneId, hours);
-      if (readings.length === 0) return;
-  
-      const moisture = Charts.formatSensorData(readings, 'soilMoisture');
-      Charts.createLine('chart-moisture', moisture.labels, [
-        Charts.sensorDataset('Moisture', moisture.values, '#2D6A4F')
-      ]);
-  
-      const temp = Charts.formatSensorData(readings, 'temperature');
-      const hum = Charts.formatSensorData(readings, 'humidity');
-      Charts.createLine('chart-temp', temp.labels, [
-        Charts.sensorDataset('Temperature', temp.values, '#D97706'),
-        Charts.sensorDataset('Humidity', hum.values, '#2563EB')
-      ]);
-    } catch (err) {
-      console.error('Chart load error:', err);
+  try {
+    // Same data-loading method used by reports.js
+    const allReadings = await FirestoreService.getSensorHistory(
+      farmId,
+      zoneId,
+      1500
+    );
+
+    console.log('Dashboard chart readings:', {
+      farmId,
+      zoneId,
+      total: allReadings.length
+    });
+
+    if (!allReadings.length) {
+      console.warn('No sensor readings available for dashboard charts.');
+      return;
     }
+
+    // Filter locally according to the selected period
+    const cutoff = Date.now() - (hours * 60 * 60 * 1000);
+
+    const readings = allReadings.filter(r => {
+      if (!r.timestamp) return false;
+
+      const date = r.timestamp?.toDate
+        ? r.timestamp.toDate()
+        : new Date(r.timestamp);
+
+      return date.getTime() >= cutoff;
+    });
+
+    // If the selected period has no data, use the available readings
+    // instead of leaving the chart completely empty.
+    const chartReadings = readings.length
+      ? readings
+      : allReadings;
+
+    const moisture = Charts.formatSensorData(
+      chartReadings,
+      'soilMoisture'
+    );
+
+    Charts.createLine(
+      'chart-moisture',
+      moisture.labels,
+      [
+        Charts.sensorDataset(
+          'Moisture',
+          moisture.values,
+          '#2D6A4F'
+        )
+      ]
+    );
+
+    const temp = Charts.formatSensorData(
+      chartReadings,
+      'temperature'
+    );
+
+    const hum = Charts.formatSensorData(
+      chartReadings,
+      'humidity'
+    );
+
+    Charts.createLine(
+      'chart-temp',
+      temp.labels,
+      [
+        Charts.sensorDataset(
+          'Temperature',
+          temp.values,
+          '#D97706'
+        ),
+        Charts.sensorDataset(
+          'Humidity',
+          hum.values,
+          '#2563EB'
+        )
+      ]
+    );
+
+  } catch (err) {
+    console.error('Dashboard chart load error:', err);
   }
+}
   
   async function loadAIInsight(farmId) {
     const body = document.getElementById('ai-insight-body');
