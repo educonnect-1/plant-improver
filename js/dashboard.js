@@ -6,7 +6,10 @@
       Charts.defaults();
   
       const userData = await FirestoreService.getOrCreateUser(user.uid, user.email, user.displayName);
-      const farm = await FirestoreService.getUserFarm(user.uid);
+      const farm = await FirestoreService.getUserFarm(
+                  user.uid,
+                  userData?.farmId || null
+                  );
   
       if (!farm) {
         document.getElementById('page-content').innerHTML = `
